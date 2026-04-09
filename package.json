@@ -2,5 +2,10 @@
   "name": "zendesk-dashboard",
   "version": "1.0.0",
   "description": "Zendesk Performance Dashboard",
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.37.0"
+  }
 }
