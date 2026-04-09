@@ -1,0 +1,6 @@
+{
+  "name": "zendesk-dashboard",
+  "version": "1.0.0",
+  "description": "Zendesk Performance Dashboard",
+  "engines": { "node": ">=18" }
+}
