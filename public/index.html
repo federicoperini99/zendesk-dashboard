@@ -191,6 +191,40 @@ table.hm th.rh{text-align:right;padding-right:8px;width:38px}
 
 footer{text-align:center;padding:26px 0 4px;font-size:11px;color:var(--muted);font-family:var(--mono);border-top:1px solid var(--border);margin-top:14px}
 
+/* Chat AI */
+.chat-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--r);margin:24px 0 16px;overflow:hidden}
+.chat-header{background:var(--navy);padding:12px 20px;display:flex;align-items:center;gap:10px}
+.chat-dot{width:8px;height:8px;border-radius:50%;background:var(--orange);box-shadow:0 0 10px rgba(230,75,56,0.7)}
+.chat-title{font-size:13px;font-weight:600;color:#fff}
+.chat-sub{font-size:11px;color:rgba(255,255,255,0.45);margin-left:auto;font-family:var(--mono)}
+.chat-messages{padding:16px 20px;max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:11px;background:var(--bg)}
+.chat-messages::-webkit-scrollbar{width:6px}
+.chat-messages::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+.msg{display:flex;gap:9px;align-items:flex-start}
+.msg-avatar{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;font-family:var(--sans);letter-spacing:.02em}
+.msg-user .msg-avatar{background:var(--navy);color:#fff}
+.msg-ai .msg-avatar{background:var(--orange);color:#fff}
+.msg-bubble{font-size:13px;line-height:1.6;background:var(--card);color:var(--text);padding:9px 13px;border-radius:9px;max-width:88%;white-space:pre-wrap;word-wrap:break-word;border:1px solid var(--border)}
+.msg-user .msg-bubble{background:var(--navy);color:#fff;margin-left:auto;border-color:transparent}
+.msg-user{flex-direction:row-reverse}
+.chat-input-row{display:flex;gap:9px;padding:12px 16px;border-top:1px solid var(--border);background:var(--card)}
+.chat-input{flex:1;font-family:var(--sans);font-size:13px;padding:9px 13px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--bg);color:var(--text);outline:none;height:38px}
+.chat-input:focus{border-color:var(--orange)}
+.chat-input::placeholder{color:var(--muted)}
+.btn-send{font-family:var(--sans);font-size:13px;font-weight:600;padding:0 18px;height:38px;border:none;border-radius:var(--r-sm);background:var(--orange);color:#fff;cursor:pointer;transition:filter .15s}
+.btn-send:hover{filter:brightness(1.08)}
+.btn-send:disabled{opacity:0.4;cursor:not-allowed}
+.typing{display:flex;gap:4px;align-items:center;padding:2px 0}
+.typing span{width:5px;height:5px;border-radius:50%;background:var(--muted);animation:blink 1.2s infinite}
+.typing span:nth-child(2){animation-delay:.2s}
+.typing span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.3}40%{opacity:1}}
+@media(max-width:640px){
+  .chat-messages{max-height:280px;padding:12px 14px}
+  .chat-input-row{padding:10px 12px}
+  .msg-bubble{font-size:12.5px}
+}
+
 /* Mobile responsive */
 @media(max-width:1100px){
   .g3{grid-template-columns:1fr 1fr}
@@ -378,6 +412,21 @@ footer{text-align:center;padding:26px 0 4px;font-size:11px;color:var(--muted);fo
   <div class="g2 mb">
     <div class="card"><div class="ct">Avg ticket/giorno lavorativo</div><div class="ch260"><canvas id="c-daily-avg"></canvas></div></div>
     <div class="card"><div class="ct">Avg ticket/mese per agente</div><div class="ch260"><canvas id="c-monthly-avg"></canvas></div></div>
+  </div>
+</div>
+
+<div class="chat-wrap" id="chat-wrap">
+  <div class="chat-header">
+    <div class="chat-dot"></div>
+    <span class="chat-title">Analisi AI</span>
+    <span class="chat-sub">Powered by Claude</span>
+  </div>
+  <div class="chat-messages" id="chatMessages">
+    <div class="msg msg-ai"><div class="msg-avatar">AI</div><div class="msg-bubble">Ciao! Posso analizzare i dati Zendesk caricati: agenti, SLA, backlog, volumi. Chiedimi cose come "qual è l'agente con più ticket aperti?" o "quali ticket sono in backlog da più di 48 ore?".</div></div>
+  </div>
+  <div class="chat-input-row">
+    <input type="text" class="chat-input" id="chatInput" placeholder="Es. come stiamo performando sugli SLA questo mese?" onkeydown="if(event.key==='Enter')sendChat()"/>
+    <button class="btn-send" id="btnSend" onclick="sendChat()">Invia</button>
   </div>
 </div>
 
@@ -1009,6 +1058,96 @@ function startAutoRefresh() {
   autoTimer = setInterval(silentRefresh, AUTO_REFRESH_MS);
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) silentRefresh(); });
+
+// ── Chat AI ───────────────────────────────────────────────────────────────────
+function buildChatContext() {
+  if (!G) return 'Dati non ancora caricati.';
+  const months = fm();
+  const recentMonths = months.slice(-6);
+  const monthlyVol = recentMonths.map(m => `${fmtM(m)}: ${G.monthlyWith[m]||0} con risposta + ${G.monthlyWithout[m]||0} auto-chiusi`).join('\n');
+
+  // Top agenti (max 12) con metriche chiave nel periodo selezionato
+  const agentsCtx = G.agents.map(a => {
+    const tot = months.reduce((s,m)=>s+(a.monthly[m]||0), 0);
+    return `- ${a.name}: ${tot} ticket, FRT ${fmtH(a.avg_frt)}, SLA ${a.sla_pct ?? '—'}%, solve rate ${a.solve_rate}%, aperti ${a.open+a.new_st}, pending ${a.pending}, risolti ${a.solved+a.closed}, auto-chiusi ${a.auto_closed}, CSAT ${a.csat ?? '—'}%`;
+  }).join('\n');
+
+  // Backlog: top 30 ticket non risposti, già ordinati per ore aperte desc
+  const backlogCtx = G.backlog.length
+    ? G.backlog.slice(0, 30).map(t => `- #${t.id} [${t.priority}] "${t.subject}" → ${t.assignee}, aperto da ${t.hours_open}h`).join('\n')
+    : 'Nessun ticket critico in backlog.';
+
+  const periodLabel = filter.from || filter.to
+    ? `${filter.from || 'inizio'} → ${filter.to || 'oggi'}`
+    : 'tutto lo storico';
+
+  return `DATI ZENDESK — Espresso Coffee Shop SRL
+Generato: ${G.generated_at}
+Periodo selezionato: ${periodLabel}
+SLA target FRT: ${G.slaFrtH}h · soglia backlog critico: ${G.backlogH}h
+
+VOLUMI TOTALI nel periodo: ${G.totalW} con risposta, ${G.totalWO} auto-chiusi, ${G.totalOpen} aperti, ${G.totalSolved} risolti, ${G.totalPend} pending
+TEAM: FRT medio ${fmtH(G.teamFrt)} · risoluzione media ${fmtH(G.teamRes)} · solve rate ${G.teamSolv}% · SLA team ${G.teamSla}%
+AGENTI ATTIVI: ${G.activeAgents} · capacità per agente: ${G.capPerAgent} tk/mese · soglia saturazione: ${G.threshold} tk/mese
+FORECAST: prossima saturazione stimata ${G.breachMonth || 'oltre 6 mesi'} · trend +${Math.round(G.slope*10)/10} ticket/mese
+
+VOLUME ULTIMI 6 MESI:
+${monthlyVol}
+
+AGENTI (${G.agents.length}):
+${agentsCtx}
+
+BACKLOG CRITICO (ticket aperti senza risposta da ≥${G.backlogH}h, ordinati per ore aperte):
+${backlogCtx}`;
+}
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+  appendMsg(msg, 'user');
+  input.value = '';
+  document.getElementById('btnSend').disabled = true;
+  const tid = appendTyping();
+  try {
+    const ctx = buildChatContext();
+    const system = `Sei un analista customer service senior per Espresso Coffee Shop SRL (ECS). Rispondi in italiano, conciso e con numeri precisi. Niente markdown (no asterischi, no #, no bullet "-"). Quando citi un agente o un ticket usa nome e ID. Se la domanda richiede dati non presenti nel contesto, dichiaralo chiaramente invece di inventare.\n\nCONTESTO:\n${ctx}`;
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ system, messages: [{role:'user', content: msg}] })
+    });
+    removeTyping(tid);
+    const data = await r.json();
+    if (!r.ok || data.error) throw new Error(data.error || 'Errore API');
+    appendMsg(data.text || '—', 'ai');
+  } catch(e) {
+    removeTyping(tid);
+    appendMsg('Errore: ' + e.message, 'ai');
+  } finally {
+    document.getElementById('btnSend').disabled = false;
+    input.focus();
+  }
+}
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function appendMsg(text, role) {
+  const el = document.getElementById('chatMessages');
+  const d = document.createElement('div');
+  d.className = `msg msg-${role}`;
+  d.innerHTML = `<div class="msg-avatar">${role==='user'?'FP':'AI'}</div><div class="msg-bubble">${escapeHtml(text)}</div>`;
+  el.appendChild(d); el.scrollTop = el.scrollHeight;
+}
+function appendTyping() {
+  const el = document.getElementById('chatMessages');
+  const id = 't'+Date.now();
+  const d = document.createElement('div');
+  d.id = id; d.className = 'msg msg-ai';
+  d.innerHTML = `<div class="msg-avatar">AI</div><div class="msg-bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  el.appendChild(d); el.scrollTop = el.scrollHeight;
+  return id;
+}
+function removeTyping(id) { const el = document.getElementById(id); if (el) el.remove(); }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 (async () => {
